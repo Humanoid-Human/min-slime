@@ -1,58 +1,55 @@
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::*;
 
 const TN_SEED: i64 = -8080661144804004702;
-const TARGET: i32 = 1300;
+const TARGET: i32 = 1000;
 const RANGE: i32 = 30000;
-const STEP: i32 = 5;
+const STEP: i32 = 10;
 
 fn main() {
     let steps = RANGE / STEP;
-    let mins: Vec<(i32, i32, i32)> = (-steps..steps).into_par_iter().map(
-        |x| {
-            let mut min = TARGET;
-            let mut minz = 0;
-            for z in -steps..steps {
-                let s = slime_spawnable_nearby(x * STEP, z * STEP, min);
-                if s < min {
-                    min = s;
-                    minz = z;
-                }
-            }
-            (min, x, minz)
-        }
-    ).filter(|x| x.0 < TARGET ).collect();
+    let mut mins: Vec<(i32, i32, i32)> = Vec::with_capacity(steps as usize);
+
+    for x in -steps..steps {
+        let mut zmins = (-steps..steps).into_par_iter().map (
+                |z| (slime_spawnable_nearby(x * STEP, z * STEP, TARGET), x, z)
+            ).filter(|x| x.0 < TARGET).collect();
+        mins.append(&mut zmins);
+    }
+
+    mins.par_sort_by(|a, b| a.0.cmp(&b.0));
 
     for (val, x, z) in mins {
-        println!("min: {} at {}, {}", val, (x as i32 - steps) * STEP, z * STEP);
+        println!("{} at {}, {}", val, x * STEP, z * STEP);
     }
 }
 
-fn slime_spawnable_nearby(x: i32, z: i32, min: i32) -> i32 {
+fn slime_spawnable_nearby(x: i32, z: i32, max: i32) -> i32 {
     let mut out = 0;
-    let cx = x >> 3;
-    let cz = z >> 3;
+    let cx = x >> 4;
+    let cz = z >> 4;
 
-    for dcx in -8..9 {
-        for dcz in -8..9 {
+    for dcx in -9..10 {
+        for dcz in -9..10 {
             if is_slime_chunk(cx + dcx, cz + dcz) {
                 let cd = dcx * dcx + dcz * dcz;
                 if cd <= 45 && cd > 5 {
-                    out += 16 * 16;
-                    if out >= min {
-                        return min + 1;
+                    out += 256;
+                    if out > max {
+                        return out;
                     }
                 } else {
                     for dx in 0..16 {
                         for dz in 0..16 {
-                            let dist_x = (cx + dcx << 3) + dx - x;
-                            let dist_z = (cz + dcz << 3) + dz - z;
+                            let dist_x = (dcx << 4) + dx;
+                            let dist_z = (dcz << 4) + dz;
                             let d2 = (dist_x * dist_x) + (dist_z * dist_z);
                             if d2 <= 128 * 128 && d2 >= 24 * 24 {
                                 out += 1;
+                                if out > max {
+                                    return out;
+                                }
                             }
-                        }
-                        if out >= min {
-                            return min + 1;
                         }
                     }
                 }
