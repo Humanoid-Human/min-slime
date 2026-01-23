@@ -1,50 +1,77 @@
-use std::{io::stdin, time::Instant};
+use std::env::args;
 use rayon::prelude::*;
+use itertools::Itertools;
 
 const TN_SEED: i64 = -8080661144804004702;
 
 fn main() {
-    let seed = get_i64("Seed", TN_SEED);
-    let step = get_i64("Step size", 10) as i32;
-    let range = get_i64("Range", 30000) as i32;
-    let target = get_i64("Maximum slime-spawnable blocks", 700) as i32;
+    let mut seed = TN_SEED;
+    let mut step64 = 8;
+    let mut range64 = 30000;
+    let mut target64 = 700;
+    let mut limit = 10;
 
-    println!("Calculating");
+    let args: Vec<String> = args().collect();
 
-    let tic = Instant::now();
-    print_mins(seed, step, range, target);
-    let toc = tic.elapsed();
+    let mut p: Option<&mut i64> = None;
+    for arg in &args[1..] {
+        if let Some(x) = p {
+            *x = arg.parse().unwrap();
+            p = None;
+            continue;
+        }
+        match arg.as_str() {
+            "-S" | "--seed" => p = Some(&mut seed),
+            "-s" | "--step" => p = Some(&mut step64),
+            "-r" | "--range" => p = Some(&mut range64),
+            "-m" | "--max" => p = Some(&mut target64),
+            "-l" | "--limit" => p = Some(&mut limit),
+            "-h" | "--help" => { print_help(); return; },
+            _ => ()
+        }
+    }
 
-    println!("Finished in {}ms", toc.as_millis());
-}
+    println!("Blocks, X, Z");
 
-fn get_i64(print: &str, default: i64) -> i64 {
-    println!("{} (leave blank for {}): ", print, default);
-    let mut input = String::new();
-    stdin().read_line(&mut input).expect("failed to read from stdin");
-    if input.len() == 1 {
-        default
-    } else {
-        input.strip_suffix("\n").unwrap().parse().expect("failed to parse input.")
+    for min in mins(seed, step64 as i32, range64 as i32, target64 as i32, limit as usize) {
+        println!("{}, {}, {}", min.num, min.x, min.z);
     }
 }
 
-fn print_mins(seed: i64, step: i32, range: i32, target: i32) {
-    let steps = range / step;
-    let mut mins: Vec<(i32, i32, i32)> = Vec::with_capacity(steps as usize);
+fn print_help() {
+    println!("Usage:");
+    println!("  -S <n> | --seed <n>   The seed to check. Default is Technut SMP seed ({})", TN_SEED);
+    println!("  -s <n> | --step <n>   Check locations every n blocks. Default is 8");
+    println!("  -r <n> | --range <n>  Check locations within n blocks in all directions. Default is 30000");
+    println!("  -m <n> | --max <n>    Maximum number of slime-spawnable points for a location to be listed. Default is 700");
+    println!("  -l <n> | --limit <n>  Maximum number of locations to list. Default is 10");
+    println!("  -h     | --help       Show this command");
+}
 
-    for x in -steps..steps {
-        let mut zmins = (-steps..steps).into_par_iter().map (
-                |z| (slime_spawnable_nearby(seed, x * step, z * step, target), x, z)
-            ).filter(|x| x.0 < target).collect();
-        mins.append(&mut zmins);
-    }
+struct Loc {
+    x: i32,
+    z: i32,
+    num: i32
+}
 
-    mins.par_sort_by(|a, b| a.0.cmp(&b.0));
+fn mins(seed: i64, step: i32, range: i32, target: i32, limit: usize) -> Vec<Loc> {
+    let r = (-range..range).step_by(step as usize);
+    let check: Vec<(i32, i32)> = r.clone().cartesian_product(r).collect();
 
-    for (val, x, z) in mins {
-        println!("{} at {}, {}", val, x * step, z * step);
-    }
+    let mut mins: Vec<Loc> = check.into_par_iter().filter_map(
+        |(x, z)| {
+            let num = slime_spawnable_nearby(seed, x, z, target);
+            if num < target {
+                Some(Loc { x, z, num })
+            } else {
+                None
+            }
+        }
+    ).collect();
+    
+    mins.par_sort_by(|a, b| a.num.cmp(&b.num));
+    mins.truncate(limit);
+    mins
 }
 
 fn slime_spawnable_nearby(seed: i64, x: i32, z: i32, max: i32) -> i32 {
@@ -70,7 +97,7 @@ fn slime_spawnable_nearby(seed: i64, x: i32, z: i32, max: i32) -> i32 {
                     let dist_x = (dcx << 4) + dx;
                     let dist_z = (dcz << 4) + dz;
                     let d2 = (dist_x * dist_x) + (dist_z * dist_z);
-                    if d2 <= 128 * 128 && d2 >= 24 * 24 {
+                    if (24 * 24..=128 * 128).contains(&d2) {
                         out += 1;
                     }
                 }
@@ -79,7 +106,7 @@ fn slime_spawnable_nearby(seed: i64, x: i32, z: i32, max: i32) -> i32 {
         }
     }
 
-    return out;
+    out
 }
 
 fn is_slime_chunk(seed: i64, cx: i32, cz: i32) -> bool {
